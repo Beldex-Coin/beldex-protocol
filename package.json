@@ -1,0 +1,22 @@
+{
+  "name": "beldex-protocol",
+  "version": "1.0.0",
+  "description": "privacy preserving protocol",
+  "main": "truffle-config.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandai-kitetsu/beldex-protocol.git"
+  },
+  "author": "bdx",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sandai-kitetsu/beldex-protocol/issues"
+  },
+  "homepage": "https://github.com/sandai-kitetsu/beldex-protocol#readme"
+}
