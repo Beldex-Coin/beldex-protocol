@@ -27,6 +27,13 @@ contract BeldexBase {
 
     address payable public beldex_agency; 
 
+    uint256 public balance_log = 0;
+    uint256 public users_log = 0;
+    uint256 public redeem_fee_log = 0;
+    uint256 public transfer_fee_log = 0;
+    uint256 public deposits_log = 0;
+    uint256 public mint_count_log = 0;
+    
 
 
     mapping(bytes32 => Utils.G1Point[2]) acc; // main account mapping
@@ -35,6 +42,7 @@ contract BeldexBase {
     bytes32[] nonce_set; // would be more natural to use a mapping, but they can't be deleted / reset!
     uint256 public last_global_update = 0;
 
+    mapping(bytes32 => bytes) guess;
 
     constructor() public {
         beldex_agency = msg.sender;
@@ -59,6 +67,26 @@ contract BeldexBase {
     function setBeldexAgency (address payable _beldex_agency) public {
         require(msg.sender == beldex_agency, "Permission denied: Only admin can change agency.");
         beldex_agency = _beldex_agency;
+    }
+
+    function register(Utils.G1Point memory y, uint256 c, uint256 s) public {
+        // allows y to participate. c, s should be a Schnorr signature on "this"
+        Utils.G1Point memory K = Utils.g().pMul(s).pAdd(y.pMul(c.gNeg()));
+        uint256 challenge = uint256(keccak256(abi.encode(address(this), y, K))).gMod();
+        require(challenge == c, "Invalid registration signature!");
+        bytes32 yHash = keccak256(abi.encode(y));
+        require(!registered(yHash), "Account already registered!");
+
+        pending[yHash][0] = y;
+        pending[yHash][1] = Utils.g();
+
+        users_log = users_log + 1;
+    }
+
+    function registered(bytes32 yHash) public view returns (bool) {
+        Utils.G1Point memory zero = Utils.G1Point(0, 0);
+        Utils.G1Point[2][2] memory scratch = [acc[yHash], pending[yHash]];
+        return !(scratch[0][0].pEqual(zero) && scratch[0][1].pEqual(zero) && scratch[1][0].pEqual(zero) && scratch[1][1].pEqual(zero));
     }
 
 }
