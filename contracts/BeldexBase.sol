@@ -88,5 +88,31 @@ contract BeldexBase {
         Utils.G1Point[2][2] memory scratch = [acc[yHash], pending[yHash]];
         return !(scratch[0][0].pEqual(zero) && scratch[0][1].pEqual(zero) && scratch[1][0].pEqual(zero) && scratch[1][1].pEqual(zero));
     }
+    function getBalance(Utils.G1Point[] memory y, uint256 round) view public returns (Utils.G1Point[2][] memory accounts) {
+        uint256 size = y.length;
+        accounts = new Utils.G1Point[2][](size);
+        for (uint256 i = 0; i < size; i++) {
+            bytes32 yHash = keccak256(abi.encode(y[i]));
+            accounts[i] = acc[yHash];
+            if (last_roll_over[yHash] < round) {
+                Utils.G1Point[2] memory scratch = pending[yHash];
+                accounts[i][0] = accounts[i][0].pAdd(scratch[0]);
+                accounts[i][1] = accounts[i][1].pAdd(scratch[1]);
+            }
+        }
+    }
+
+    function getAccountState (Utils.G1Point memory y) public view returns (Utils.G1Point[2] memory y_available, Utils.G1Point[2] memory y_pending) {
+        bytes32 yHash = keccak256(abi.encode(y));
+        y_available = acc[yHash];
+        y_pending = pending[yHash];
+        return (y_available, y_pending);
+    }
+
+    function getGuess (Utils.G1Point memory y) public view returns (bytes memory y_guess) {
+        bytes32 yHash = keccak256(abi.encode(y));
+        y_guess = guess[yHash];
+        return y_guess;
+    }
 
 }
