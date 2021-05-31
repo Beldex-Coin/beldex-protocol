@@ -115,4 +115,45 @@ contract BeldexBase {
         return y_guess;
     }
 
+    function rollOver(bytes32 yHash) internal {
+        uint256 e = 0;
+        if (round_base == 0)
+            e = block.number / round_len;
+        else if (round_base == 1)
+            e = block.timestamp / round_len;
+        else
+            revert("Invalid round base.");
+
+        if (last_roll_over[yHash] < e) {
+            Utils.G1Point[2][2] memory scratch = [acc[yHash], pending[yHash]];
+            acc[yHash][0] = scratch[0][0].pAdd(scratch[1][0]);
+            acc[yHash][1] = scratch[0][1].pAdd(scratch[1][1]);
+            // acc[yHash] = scratch[0]; // can't do this---have to do the above instead (and spend 2 sloads / stores)---because "not supported". revisit
+            delete pending[yHash]; // pending[yHash] = [Utils.G1Point(0, 0), Utils.G1Point(0, 0)];
+            last_roll_over[yHash] = e;
+        }
+        if (last_global_update < e) {
+            last_global_update = e;
+            delete nonce_set;
+        }
+    }
+
+    function mintBase(Utils.G1Point memory y, uint256 amount, bytes memory encGuess) internal {
+
+        require(amount <= MAX && balance_log + amount <= MAX, "[Beldex mint] Mint pushes contract past maximum value.");
+        balance_log += amount;
+        deposits_log += amount;
+        mint_count_log += 1;
+
+        bytes32 yHash = keccak256(abi.encode(y));
+        require(registered(yHash), "[Beldex mint] Account not yet registered.");
+        rollOver(yHash);
+
+        Utils.G1Point memory scratch = pending[yHash][0];
+        scratch = scratch.pAdd(Utils.g().pMul(amount));
+        pending[yHash][0] = scratch;
+
+        guess[yHash] = encGuess;
+    }
+
 }
