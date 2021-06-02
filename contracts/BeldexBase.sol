@@ -3,7 +3,7 @@ pragma solidity ^0.6.0;
 pragma experimental ABIEncoderV2;
 
 import "./Utils.sol";
-import "./BeldexTransfer.sol";
+import "./BeldexRedeem.sol";
 
 
 contract BeldexBase {
@@ -50,10 +50,31 @@ contract BeldexBase {
 
     mapping(bytes32 => bytes) guess;
 
-    constructor() public {
+    constructor(address _redeem, uint256 _unit) public {
         beldex_agency = msg.sender;
+        beldex_redeem = BeldexRedeem(_redeem);
+        unit = _unit;
 
     }
+
+    function toUnitAmount(uint256 nativeAmount) internal view returns (uint256) {
+        require(nativeAmount % unit == 0, "Native amount must be multiple of a unit.");
+        uint256 amount = nativeAmount / unit;
+        require(0 <= amount && amount <= MAX, "Amount out of range."); 
+        return amount;
+    }
+
+    function toNativeAmount(uint256 unitAmount) internal view returns (uint256) {
+        require(0 <= unitAmount && unitAmount <= MAX, "Amount out of range");
+        return unitAmount * unit;
+    }
+
+    function setRedeemFeeStrategy(uint256 numerator, uint256 denominator) public {
+        require(msg.sender == beldex_agency, "Permission denied: Only admin can change redeem fee strategy.");
+        redeem_fee_numerator = numerator;
+        redeem_fee_denominator = denominator;
+    }
+
 
     function setRoundBase (uint256 _round_base) public {
         require(msg.sender == beldex_agency, "Permission denied: Only admin can change round base.");
