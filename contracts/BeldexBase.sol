@@ -3,6 +3,7 @@ pragma solidity ^0.6.0;
 pragma experimental ABIEncoderV2;
 
 import "./Utils.sol";
+import "./BeldexTransfer.sol";
 
 
 contract BeldexBase {
@@ -26,6 +27,11 @@ contract BeldexBase {
 
 
     address payable public beldex_agency; 
+
+    uint256 public redeem_fee_numerator = 1;
+    uint256 public redeem_fee_denominator = 100;
+    
+    BeldexTransfer beldex_transfer;
 
     uint256 public balance_log = 0;
     uint256 public users_log = 0;
@@ -155,5 +161,35 @@ contract BeldexBase {
 
         guess[yHash] = encGuess;
     }
+
+    function redeemBase(Utils.G1Point memory y, uint256 amount, Utils.G1Point memory u, bytes memory proof, bytes memory encGuess) internal {
+
+        require(balance_log >= amount, "[Beldex redeem] Failed: Invalid redeem amount.");
+        balance_log -= amount;
+        
+
+        bytes32 yHash = keccak256(abi.encode(y));
+        require(registered(yHash), "[Beldex redeem] Account not yet registered.");
+        rollOver(yHash);
+
+        Utils.G1Point[2] memory scratch = pending[yHash];
+        pending[yHash][0] = scratch[0].pAdd(Utils.g().pMul(amount.gNeg()));
+
+        scratch = acc[yHash]; // simulate debit of acc---just for use in verification, won't be applied
+        scratch[0] = scratch[0].pAdd(Utils.g().pMul(amount.gNeg()));
+        bytes32 uHash = keccak256(abi.encode(u));
+        for (uint256 i = 0; i < nonce_set.length; i++) {
+            require(nonce_set[i] != uHash, "[Beldex redeem] Nonce already seen!");
+        }
+        nonce_set.push(uHash);
+
+        guess[yHash] = encGuess;
+
+        BeldexRedeem.Statement memory beldex_stm = beldex_redeem.wrapStatement(scratch[0], scratch[1], y, last_global_update, u, msg.sender);
+        BeldexRedeem.Proof memory beldex_proof = beldex_redeem.unserialize(proof);
+
+        require(beldex_redeem.verify(beldex_stm, beldex_proof), "[Beldex redeem] Failed: verification!");
+    }
+
 
 }
