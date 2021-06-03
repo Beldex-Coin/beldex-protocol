@@ -111,5 +111,70 @@ contract BeldexTransfer {
         Utils.G1Point hPrimeSum;
         uint256 o;
     }
+    function wrapStatement (Utils.G1Point[] memory CLn, Utils.G1Point[] memory CRn, Utils.G1Point[] memory C, Utils.G1Point memory D, Utils.G1Point[] memory y, uint256 epoch, Utils.G1Point memory u) public pure returns (Statement memory statement) {
 
+        statement.ct_l = CLn;
+        statement.ct_r = CRn;
+        statement.C = C;
+        statement.D = D;
+        statement.pk = y;
+        statement.epoch = epoch;
+        statement.u = u;
+        return statement;
+    }
+
+    function unserialize(bytes memory arr) external pure returns (Proof memory proof) {
+        proof.BA = Utils.G1Point(Utils.slice(arr, 0), Utils.slice(arr, 32));
+        proof.BS = Utils.G1Point(Utils.slice(arr, 64), Utils.slice(arr, 96));
+        proof.A = Utils.G1Point(Utils.slice(arr, 128), Utils.slice(arr, 160));
+        proof.B = Utils.G1Point(Utils.slice(arr, 192), Utils.slice(arr, 224));
+
+        uint256 m = (arr.length - 1472) / 576;
+        proof.CLnG = new Utils.G1Point[](m);
+        proof.CRnG = new Utils.G1Point[](m);
+        proof.C_0G = new Utils.G1Point[](m);
+        proof.DG = new Utils.G1Point[](m);
+        proof.y_0G = new Utils.G1Point[](m);
+        proof.gG = new Utils.G1Point[](m);
+        proof.C_XG = new Utils.G1Point[](m);
+        proof.y_XG = new Utils.G1Point[](m);
+        proof.f = new uint256[](2 * m);
+        for (uint256 k = 0; k < m; k++) {
+            proof.CLnG[k] = Utils.G1Point(Utils.slice(arr, 256 + k * 64), Utils.slice(arr, 288 + k * 64));
+            proof.CRnG[k] = Utils.G1Point(Utils.slice(arr, 256 + (m + k) * 64), Utils.slice(arr, 288 + (m + k) * 64));
+            proof.C_0G[k] = Utils.G1Point(Utils.slice(arr, 256 + m * 128 + k * 64), Utils.slice(arr, 288 + m * 128 + k * 64));
+            proof.DG[k] = Utils.G1Point(Utils.slice(arr, 256 + m * 192 + k * 64), Utils.slice(arr, 288 + m * 192 + k * 64));
+            proof.y_0G[k] = Utils.G1Point(Utils.slice(arr, 256 + m * 256 + k * 64), Utils.slice(arr, 288 + m * 256 + k * 64));
+            proof.gG[k] = Utils.G1Point(Utils.slice(arr, 256 + m * 320 + k * 64), Utils.slice(arr, 288 + m * 320 + k * 64));
+            proof.C_XG[k] = Utils.G1Point(Utils.slice(arr, 256 + m * 384 + k * 64), Utils.slice(arr, 288 + m * 384 + k * 64));
+            proof.y_XG[k] = Utils.G1Point(Utils.slice(arr, 256 + m * 448 + k * 64), Utils.slice(arr, 288 + m * 448 + k * 64));
+            proof.f[k] = uint256(Utils.slice(arr, 256 + m * 512 + k * 32));
+            proof.f[k + m] = uint256(Utils.slice(arr, 256 + m * 544 + k * 32));
+        }
+        uint256 starting = m * 576;
+        proof.z_A = uint256(Utils.slice(arr, 256 + starting));
+
+        proof.tCommits = [Utils.G1Point(Utils.slice(arr, 288 + starting), Utils.slice(arr, 320 + starting)), Utils.G1Point(Utils.slice(arr, 352 + starting), Utils.slice(arr, 384 + starting))];
+        proof.tHat = uint256(Utils.slice(arr, 416 + starting));
+        proof.mu = uint256(Utils.slice(arr, 448 + starting));
+
+        proof.c = uint256(Utils.slice(arr, 480 + starting));
+        proof.s_sk = uint256(Utils.slice(arr, 512 + starting));
+        proof.s_r = uint256(Utils.slice(arr, 544 + starting));
+        proof.s_b = uint256(Utils.slice(arr, 576 + starting));
+        proof.s_tau = uint256(Utils.slice(arr, 608 + starting));
+
+        BeldexIP.Proof memory ipProof;
+        ipProof.ls = new Utils.G1Point[](6);
+        ipProof.rs = new Utils.G1Point[](6);
+        for (uint256 i = 0; i < 6; i++) { // 2^6 = 64.
+            ipProof.ls[i] = Utils.G1Point(Utils.slice(arr, 640 + starting + i * 64), Utils.slice(arr, 672 + starting + i * 64));
+            ipProof.rs[i] = Utils.G1Point(Utils.slice(arr, 640 + starting + (6 + i) * 64), Utils.slice(arr, 672 + starting + (6 + i) * 64));
+        }
+        ipProof.a = uint256(Utils.slice(arr, 640 + starting + 6 * 128));
+        ipProof.b = uint256(Utils.slice(arr, 672 + starting + 6 * 128));
+        proof.ipProof = ipProof;
+
+        return proof;
+    }
 }
