@@ -73,7 +73,7 @@ contract BeldexRedeem {
     function gSum() internal pure returns (Utils.G1Point memory) {
         return Utils.G1Point(0x2257118d30fe5064dda298b2fac15cf96fd51f0e7e3df342d0aed40b8d7bb151, 0x0d4250e7509c99370e6b15ebfe4f1aa5e65a691133357901aa4b0641f96c80a8);
     }
-    
+
     function verify(Statement memory statement, Proof memory proof) external view returns (bool) {
         uint256 statementHash = uint256(keccak256(abi.encode(statement.ct_l, statement.ct_r, statement.pk, statement.epoch, statement.sender))).gMod();
 

@@ -111,6 +111,129 @@ contract BeldexTransfer {
         Utils.G1Point hPrimeSum;
         uint256 o;
     }
+
+    function assemblePolynomials(uint256[2][] memory f) internal view returns (uint256[2][] memory result) {
+        uint256 m = f.length / 2;
+        uint256 N = 2 ** m;
+        result = new uint256[2][](N);
+        for (uint256 i = 0; i < 2; i++) {
+            uint256[] memory half = recursivePolynomials(i * m, (i + 1) * m, 1, f);
+            for (uint256 j = 0; j < N; j++) {
+                result[j][i] = half[j];
+            }
+        }
+    }
+
+    function recursivePolynomials(uint256 baseline, uint256 current, uint256 accum, uint256[2][] memory f) internal view returns (uint256[] memory result) {
+        // have to do a bunch of re-allocating because solidity won't let me have something which is internal and also modifies (internal) state. (?)
+        uint256 size = 2 ** (current - baseline); // size is at least 2...
+        result = new uint256[](size);
+
+        if (current == baseline) {
+            result[0] = accum;
+            return result;
+        }
+        current = current - 1;
+
+        uint256[] memory left = recursivePolynomials(baseline, current, accum.gMul(f[current][0]), f);
+        uint256[] memory right = recursivePolynomials(baseline, current, accum.gMul(f[current][1]), f);
+        for (uint256 i = 0; i < size / 2; i++) {
+            result[i] = left[i];
+            result[i + size / 2] = right[i];
+        }
+    }
+
+    function assembleConvolutions(uint256[2][] memory exponent, Utils.G1Point[] memory base) internal view returns (Utils.G1Point[2][] memory result) {
+        // exponent is two "rows" (actually columns).
+        // will return two rows, each of half the length of the exponents;
+        // namely, we will return the Hadamards of "base" by the even circular shifts of "exponent"'s rows.
+        uint256 size = exponent.length;
+        uint256 half = size / 2;
+        result = new Utils.G1Point[2][](half); // assuming that this is necessary even when return is declared up top
+
+        Utils.G1Point[] memory base_fft = fft(base, false);
+
+        uint256[] memory exponent_fft = new uint256[](size);
+        for (uint256 i = 0; i < 2; i++) {
+            for (uint256 j = 0; j < size; j++) {
+                exponent_fft[j] = exponent[(size - j) % size][i]; // convolutional flip plus copy
+            }
+
+            exponent_fft = fft(exponent_fft);
+            Utils.G1Point[] memory inverse_fft = new Utils.G1Point[](half);
+            uint256 compensation = 2;
+            compensation = compensation.gInv();
+            for (uint256 j = 0; j < half; j++) { // Hadamard
+                inverse_fft[j] = base_fft[j].pMul(exponent_fft[j]).pAdd(base_fft[j + half].pMul(exponent_fft[j + half])).pMul(compensation);
+            }
+
+            inverse_fft = fft(inverse_fft, true);
+            for (uint256 j = 0; j < half; j++) {
+                result[j][i] = inverse_fft[j];
+            }
+        }
+    }
+
+    function fft(Utils.G1Point[] memory input, bool inverse) internal view returns (Utils.G1Point[] memory result) {
+        uint256 size = input.length;
+        if (size == 1) {
+            return input;
+        }
+        require(size % 2 == 0, "Input size is not a power of 2!");
+
+        uint256 omega = UNITY.gExp(2**28 / size);
+        uint256 compensation = 1;
+        if (inverse) {
+            omega = omega.gInv();
+            compensation = 2;
+        }
+        compensation = compensation.gInv();
+        Utils.G1Point[] memory even = fft(extract(input, 0), inverse);
+        Utils.G1Point[] memory odd = fft(extract(input, 1), inverse);
+        uint256 omega_run = 1;
+        result = new Utils.G1Point[](size);
+        for (uint256 i = 0; i < size / 2; i++) {
+            Utils.G1Point memory temp = odd[i].pMul(omega_run);
+            result[i] = even[i].pAdd(temp).pMul(compensation);
+            result[i + size / 2] = even[i].pAdd(temp.pNeg()).pMul(compensation);
+            omega_run = omega_run.gMul(omega);
+        }
+    }
+
+    function extract(Utils.G1Point[] memory input, uint256 parity) internal pure returns (Utils.G1Point[] memory result) {
+        result = new Utils.G1Point[](input.length / 2);
+        for (uint256 i = 0; i < input.length / 2; i++) {
+            result[i] = input[2 * i + parity];
+        }
+    }
+
+    function fft(uint256[] memory input) internal view returns (uint256[] memory result) {
+        uint256 size = input.length;
+        if (size == 1) {
+            return input;
+        }
+        require(size % 2 == 0, "Input size is not a power of 2!");
+
+        uint256 omega = UNITY.gExp(2**28 / size);
+        uint256[] memory even = fft(extract(input, 0));
+        uint256[] memory odd = fft(extract(input, 1));
+        uint256 omega_run = 1;
+        result = new uint256[](size);
+        for (uint256 i = 0; i < size / 2; i++) {
+            uint256 temp = odd[i].gMul(omega_run);
+            result[i] = even[i].gAdd(temp);
+            result[i + size / 2] = even[i].gSub(temp);
+            omega_run = omega_run.gMul(omega);
+        }
+    }
+
+    function extract(uint256[] memory input, uint256 parity) internal pure returns (uint256[] memory result) {
+        result = new uint256[](input.length / 2);
+        for (uint256 i = 0; i < input.length / 2; i++) {
+            result[i] = input[2 * i + parity];
+        }
+    }
+
     function wrapStatement (Utils.G1Point[] memory CLn, Utils.G1Point[] memory CRn, Utils.G1Point[] memory C, Utils.G1Point memory D, Utils.G1Point[] memory y, uint256 epoch, Utils.G1Point memory u) public pure returns (Statement memory statement) {
 
         statement.ct_l = CLn;
