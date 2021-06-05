@@ -112,6 +112,112 @@ contract BeldexTransfer {
         uint256 o;
     }
 
+    function gSum() internal pure returns (Utils.G1Point memory) {
+        return Utils.G1Point(0x00715f13ea08d6b51bedcde3599d8e12163e090921309d5aafc9b5bfaadbcda0, 0x27aceab598af7bf3d16ca9d40fe186c489382c21bb9d22b19cb3af8b751b959f);
+    }
+
+    function verify(Statement memory statement, Proof memory proof) external view returns (bool) {
+        uint256 statementHash = uint256(keccak256(abi.encode(statement.ct_l, statement.ct_r, statement.C, statement.D, statement.pk, statement.epoch))).gMod();
+
+        AnonInfo memory anon_info;
+        anon_info.v = uint256(keccak256(abi.encode(statementHash, proof.BA, proof.BS, proof.A, proof.B))).gMod();
+        anon_info.w = uint256(keccak256(abi.encode(anon_info.v, proof.CLnG, proof.CRnG, proof.C_0G, proof.DG, proof.y_0G, proof.gG, proof.C_XG, proof.y_XG))).gMod();
+        anon_info.m = proof.f.length / 2;
+        anon_info.N = 2 ** anon_info.m;
+        anon_info.f = new uint256[2][](2 * anon_info.m);
+        for (uint256 k = 0; k < 2 * anon_info.m; k++) {
+            anon_info.f[k][1] = proof.f[k];
+            anon_info.f[k][0] = anon_info.w.gSub(proof.f[k]);
+        }
+
+        for (uint256 k = 0; k < 2 * anon_info.m; k++) {
+            anon_info.temp = anon_info.temp.pAdd(ip.gs(k).pMul(anon_info.f[k][1]));
+            anon_info.temp = anon_info.temp.pAdd(ip.gs(k + 2 * anon_info.m).pMul(anon_info.f[k][1].gMul(anon_info.w.gSub(anon_info.f[k][1]))));
+        }
+        anon_info.temp = anon_info.temp.pAdd(ip.gs(4 * anon_info.m).pMul(anon_info.f[0][1].gMul(anon_info.f[anon_info.m][1])).pAdd(ip.gs(1 + 4 * anon_info.m).pMul(anon_info.f[0][0].gMul(anon_info.f[anon_info.m][0]))));
+        require(proof.B.pMul(anon_info.w).pAdd(proof.A).pEqual(anon_info.temp.pAdd(Utils.h().pMul(proof.z_A))), "Recovery failure for B^w * A.");
+
+        anon_info.r = assemblePolynomials(anon_info.f);
+
+        anon_info.CR = assembleConvolutions(anon_info.r, statement.C);
+        anon_info.yR = assembleConvolutions(anon_info.r, statement.pk);
+        for (uint256 i = 0; i < anon_info.N; i++) {
+            anon_info.CLnR = anon_info.CLnR.pAdd(statement.ct_l[i].pMul(anon_info.r[i][0]));
+            anon_info.CRnR = anon_info.CRnR.pAdd(statement.ct_r[i].pMul(anon_info.r[i][0]));
+        }
+        anon_info.vPow = 1;
+        for (uint256 i = 0; i < anon_info.N; i++) {
+            anon_info.C_XR = anon_info.C_XR.pAdd(anon_info.CR[i / 2][i % 2].pMul(anon_info.vPow));
+            anon_info.y_XR = anon_info.y_XR.pAdd(anon_info.yR[i / 2][i % 2].pMul(anon_info.vPow));
+            if (i > 0) {
+                anon_info.vPow = anon_info.vPow.gMul(anon_info.v);
+            }
+        }
+        anon_info.wPow = 1;
+        for (uint256 k = 0; k < anon_info.m; k++) {
+            anon_info.CLnR = anon_info.CLnR.pAdd(proof.CLnG[k].pMul(anon_info.wPow.gNeg()));
+            anon_info.CRnR = anon_info.CRnR.pAdd(proof.CRnG[k].pMul(anon_info.wPow.gNeg()));
+            anon_info.CR[0][0] = anon_info.CR[0][0].pAdd(proof.C_0G[k].pMul(anon_info.wPow.gNeg()));
+            anon_info.DR = anon_info.DR.pAdd(proof.DG[k].pMul(anon_info.wPow.gNeg()));
+            anon_info.yR[0][0] = anon_info.yR[0][0].pAdd(proof.y_0G[k].pMul(anon_info.wPow.gNeg()));
+            anon_info.gR = anon_info.gR.pAdd(proof.gG[k].pMul(anon_info.wPow.gNeg()));
+            anon_info.C_XR = anon_info.C_XR.pAdd(proof.C_XG[k].pMul(anon_info.wPow.gNeg()));
+            anon_info.y_XR = anon_info.y_XR.pAdd(proof.y_XG[k].pMul(anon_info.wPow.gNeg()));
+
+            anon_info.wPow = anon_info.wPow.gMul(anon_info.w);
+        }
+        anon_info.DR = anon_info.DR.pAdd(statement.D.pMul(anon_info.wPow));
+        anon_info.gR = anon_info.gR.pAdd(Utils.g().pMul(anon_info.wPow));
+
+        TransferInfo memory zetherAuxiliaries;
+        zetherAuxiliaries.y = uint256(keccak256(abi.encode(anon_info.w))).gMod();
+        zetherAuxiliaries.ys[0] = 1;
+        zetherAuxiliaries.k = 1;
+        for (uint256 i = 1; i < 64; i++) {
+            zetherAuxiliaries.ys[i] = zetherAuxiliaries.ys[i - 1].gMul(zetherAuxiliaries.y);
+            zetherAuxiliaries.k = zetherAuxiliaries.k.gAdd(zetherAuxiliaries.ys[i]);
+        }
+        zetherAuxiliaries.z = uint256(keccak256(abi.encode(zetherAuxiliaries.y))).gMod();
+        zetherAuxiliaries.zs = [zetherAuxiliaries.z.gExp(2), zetherAuxiliaries.z.gExp(3)];        
+        zetherAuxiliaries.zSum = zetherAuxiliaries.zs[0].gAdd(zetherAuxiliaries.zs[1]).gMul(zetherAuxiliaries.z);
+        zetherAuxiliaries.k = zetherAuxiliaries.k.gMul(zetherAuxiliaries.z.gSub(zetherAuxiliaries.zs[0])).gSub(zetherAuxiliaries.zSum.gMul(2 ** 32).gSub(zetherAuxiliaries.zSum));
+        zetherAuxiliaries.t = proof.tHat.gSub(zetherAuxiliaries.k); // t = tHat - delta(y, z)
+        for (uint256 i = 0; i < 32; i++) {
+            zetherAuxiliaries.twoTimesZSquared[i] = zetherAuxiliaries.zs[0].gMul(2 ** i);
+            zetherAuxiliaries.twoTimesZSquared[i + 32] = zetherAuxiliaries.zs[1].gMul(2 ** i);
+        }
+
+        zetherAuxiliaries.x = uint256(keccak256(abi.encode(zetherAuxiliaries.z, proof.tCommits))).gMod();
+        zetherAuxiliaries.tEval = proof.tCommits[0].pMul(zetherAuxiliaries.x).pAdd(proof.tCommits[1].pMul(zetherAuxiliaries.x.gMul(zetherAuxiliaries.x))); // replace with "commit"?
+
+        SigmaInfo memory sigma_info;
+        sigma_info.A_y = anon_info.gR.pMul(proof.s_sk).pAdd(anon_info.yR[0][0].pMul(proof.c.gNeg()));
+        sigma_info.A_D = Utils.g().pMul(proof.s_r).pAdd(statement.D.pMul(proof.c.gNeg())); // add(mul(anon_info.gR, proof.s_r), mul(anon_info.DR, proof.c.neg()));
+        sigma_info.A_b = Utils.g().pMul(proof.s_b).pAdd(anon_info.DR.pMul(zetherAuxiliaries.zs[0].gNeg()).pAdd(anon_info.CRnR.pMul(zetherAuxiliaries.zs[1])).pMul(proof.s_sk).pAdd(anon_info.CR[0][0].pMul(zetherAuxiliaries.zs[0].gNeg()).pAdd(anon_info.CLnR.pMul(zetherAuxiliaries.zs[1])).pMul(proof.c.gNeg())));
+        sigma_info.A_X = anon_info.y_XR.pMul(proof.s_r).pAdd(anon_info.C_XR.pMul(proof.c.gNeg()));
+        sigma_info.A_t = Utils.g().pMul(zetherAuxiliaries.t).pAdd(zetherAuxiliaries.tEval.pNeg()).pMul(proof.c.gMul(anon_info.wPow)).pAdd(Utils.h().pMul(proof.s_tau)).pAdd(Utils.g().pMul(proof.s_b.gNeg()));
+        sigma_info.gEpoch = Utils.mapInto("Beldex", statement.epoch);
+        sigma_info.A_u = sigma_info.gEpoch.pMul(proof.s_sk).pAdd(statement.u.pMul(proof.c.gNeg()));
+
+        sigma_info.c = uint256(keccak256(abi.encode(zetherAuxiliaries.x, sigma_info.A_y, sigma_info.A_D, sigma_info.A_b, sigma_info.A_X, sigma_info.A_t, sigma_info.A_u))).gMod();
+        require(sigma_info.c == proof.c, string(abi.encodePacked("Sigma protocol challenge equality failure. Epoch: ", Utils.uint2str(statement.epoch))));
+
+        IPInfo memory ip_info;
+        ip_info.o = uint256(keccak256(abi.encode(sigma_info.c))).gMod();
+        ip_info.u_x = Utils.g().pMul(ip_info.o);
+        ip_info.hPrimes = new Utils.G1Point[](64);
+        for (uint256 i = 0; i < 64; i++) {
+            ip_info.hPrimes[i] = ip.hs(i).pMul(zetherAuxiliaries.ys[i].gInv());
+            ip_info.hPrimeSum = ip_info.hPrimeSum.pAdd(ip_info.hPrimes[i].pMul(zetherAuxiliaries.ys[i].gMul(zetherAuxiliaries.z).gAdd(zetherAuxiliaries.twoTimesZSquared[i])));
+        }
+        ip_info.P = proof.BA.pAdd(proof.BS.pMul(zetherAuxiliaries.x)).pAdd(gSum().pMul(zetherAuxiliaries.z.gNeg())).pAdd(ip_info.hPrimeSum);
+        ip_info.P = ip_info.P.pAdd(Utils.h().pMul(proof.mu.gNeg()));
+        ip_info.P = ip_info.P.pAdd(ip_info.u_x.pMul(proof.tHat));
+        require(ip.verifyInnerProduct(ip_info.hPrimes, ip_info.u_x, ip_info.P, proof.ipProof, ip_info.o), "Inner product proof verification failed.");
+
+        return true;
+    }
+
     function assemblePolynomials(uint256[2][] memory f) internal view returns (uint256[2][] memory result) {
         uint256 m = f.length / 2;
         uint256 N = 2 ** m;
