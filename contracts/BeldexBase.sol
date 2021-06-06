@@ -3,6 +3,7 @@ pragma solidity ^0.6.0;
 pragma experimental ABIEncoderV2;
 
 import "./Utils.sol";
+import "./BeldexTransfer.sol";
 import "./BeldexRedeem.sol";
 
 
@@ -30,6 +31,8 @@ contract BeldexBase {
 
     uint256 public redeem_fee_numerator = 1;
     uint256 public redeem_fee_denominator = 100;
+    uint256 public transfer_fee_numerator = 1;
+    uint256 public transfer_fee_denominator = 5;
     
     BeldexTransfer beldex_transfer;
 
@@ -50,8 +53,12 @@ contract BeldexBase {
 
     mapping(bytes32 => bytes) guess;
 
-    constructor(address _redeem, uint256 _unit) public {
+    event TransferOccurred(Utils.G1Point[] parties); 
+    event LogUint256(string label, uint256 indexed value);
+
+    constructor(address _transfer,address _redeem, uint256 _unit) public {
         beldex_agency = msg.sender;
+        beldex_transfer = BeldexTransfer(_transfer);
         beldex_redeem = BeldexRedeem(_redeem);
         unit = _unit;
 
@@ -74,6 +81,13 @@ contract BeldexBase {
         redeem_fee_numerator = numerator;
         redeem_fee_denominator = denominator;
     }
+
+    function setTransferFeeStrategy(uint256 numerator, uint256 denominator) public {
+        require(msg.sender == beldex_agency, "Permission denied: Only admin can change transfer fee strategy.");
+        transfer_fee_numerator = numerator;
+        transfer_fee_denominator = denominator;
+    }
+
 
 
     function setRoundBase (uint256 _round_base) public {
@@ -155,8 +169,7 @@ contract BeldexBase {
             Utils.G1Point[2][2] memory scratch = [acc[yHash], pending[yHash]];
             acc[yHash][0] = scratch[0][0].pAdd(scratch[1][0]);
             acc[yHash][1] = scratch[0][1].pAdd(scratch[1][1]);
-            // acc[yHash] = scratch[0]; // can't do this---have to do the above instead (and spend 2 sloads / stores)---because "not supported". revisit
-            delete pending[yHash]; // pending[yHash] = [Utils.G1Point(0, 0), Utils.G1Point(0, 0)];
+            delete pending[yHash];
             last_roll_over[yHash] = e;
         }
         if (last_global_update < e) {
@@ -212,5 +225,54 @@ contract BeldexBase {
         require(beldex_redeem.verify(beldex_stm, beldex_proof), "[Beldex redeem] Failed: verification!");
     }
 
+    function transfer(Utils.G1Point[] memory C, Utils.G1Point memory D, 
+                      Utils.G1Point[] memory y, Utils.G1Point memory u, 
+                      bytes memory proof) public payable {
+
+        uint256 startGas = gasleft();
+
+        // TODO: check that sender and receiver should NOT be equal.
+        uint256 size = y.length;
+        Utils.G1Point[] memory CLn = new Utils.G1Point[](size);
+        Utils.G1Point[] memory CRn = new Utils.G1Point[](size);
+        require(C.length == size, "[Beldex transfer] Input array length mismatch!");
+
+
+        for (uint256 i = 0; i < size; i++) {
+            bytes32 yHash = keccak256(abi.encode(y[i]));
+            require(registered(yHash), "[Beldex transfer] Account not yet registered.");
+            rollOver(yHash);
+            Utils.G1Point[2] memory scratch = pending[yHash];
+            pending[yHash][0] = scratch[0].pAdd(C[i]);
+            pending[yHash][1] = scratch[1].pAdd(D);
+
+            scratch = acc[yHash];
+            CLn[i] = scratch[0].pAdd(C[i]);
+            CRn[i] = scratch[1].pAdd(D);
+        }
+
+        bytes32 uHash = keccak256(abi.encode(u));
+        for (uint256 i = 0; i < nonce_set.length; i++) {
+            require(nonce_set[i] != uHash, "[Beldex transfer] Nonce already seen!");
+        }
+        nonce_set.push(uHash);
+
+        BeldexTransfer.Statement memory beldex_stm = beldex_transfer.wrapStatement(CLn, CRn, C, D, y, last_global_update, u);
+        BeldexTransfer.Proof memory beldex_proof = beldex_transfer.unserialize(proof);
+
+        require(beldex_transfer.verify(beldex_stm, beldex_proof), "[Beldex transfer] Failed: verification");
+
+        uint256 usedGas = startGas - gasleft();
+        
+        uint256 fee = (usedGas * transfer_fee_numerator / transfer_fee_denominator) * tx.gasprice;
+        if (fee > 0) {
+            require(msg.value >= fee, "[Beldex transfer] Not enough fee sent with the transfer transaction.");
+            beldex_agency.transfer(fee);
+            transfer_fee_log = transfer_fee_log + fee;
+        }
+        msg.sender.transfer(msg.value - fee);
+
+        emit TransferOccurred(y);
+    }
 
 }
