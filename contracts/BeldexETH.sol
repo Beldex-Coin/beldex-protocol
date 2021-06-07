@@ -17,4 +17,17 @@ contract BeldexETH is BeldexBase {
         mintBase(y, unitAmount, encGuess);
     }
 
+    function redeem(Utils.G1Point memory y, uint256 unitAmount, Utils.G1Point memory u, bytes memory proof, bytes memory encGuess) public {
+        uint256 nativeAmount = toNativeAmount(unitAmount);
+        uint256 fee = nativeAmount * redeem_fee_numerator / redeem_fee_denominator; 
+
+        redeemBase(y, unitAmount, u, proof, encGuess);
+
+        if (fee > 0) {
+            beldex_agency.transfer(fee);
+            redeem_fee_log = redeem_fee_log + fee;
+        }
+        msg.sender.transfer(nativeAmount-fee);
+    }
+
 }
