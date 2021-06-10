@@ -35,6 +35,7 @@ contract BeldexBase {
     uint256 public transfer_fee_denominator = 5;
     
     BeldexTransfer beldex_transfer;
+    BeldexRedeem beldex_redeem;
 
     uint256 public balance_log = 0;
     uint256 public users_log = 0;
