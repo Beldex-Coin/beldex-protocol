@@ -23,5 +23,16 @@ contract RazeERC20 is RazeBase {
         // In order for the following to succeed, `msg.sender` have to first approve `this` to spend the nativeAmount.
         require(token.transferFrom(msg.sender, address(this), nativeAmount), "[Raze mint] Native 'transferFrom' failed.");
     }
+    function redeem(Utils.G1Point memory y, uint256 unitAmount, Utils.G1Point memory u, bytes memory proof, bytes memory encGuess) public {
+        uint256 nativeAmount = toNativeAmount(unitAmount);
+        uint256 fee = nativeAmount * redeem_fee_numerator / redeem_fee_denominator; 
 
+        redeemBase(y, unitAmount, u, proof, encGuess);
+
+        if (fee > 0) {
+            require(token.transfer(beldex_agency, fee), "[Beldex redeem] Fail to charge fee.");
+            redeem_fee_log = redeem_fee_log + fee;
+        }
+        require(token.transfer(msg.sender, nativeAmount - fee), "[Beldex redeem] Fail to transfer tokens.");
+    }
 }
